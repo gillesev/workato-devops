@@ -59,7 +59,7 @@ stages:
               buildType: 'current'            # or 'specific' if downloading from another build
               downloadType: 'single'          # or 'all' to get all artifacts
               artifactName: '$(artifactName)' # must match the name used in PublishBuildArtifacts
-              downloadPath: '$(System.ArtifactsDirectory)'  # where to place the downloaded files
+              downloadPath: '$(Pipeline.Workspace)'  # where to place the downloaded files
           
           - task: PowerShell@2
             displayName: 'Send POST request to Workato API'
