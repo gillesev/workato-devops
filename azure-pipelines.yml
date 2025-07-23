@@ -1,0 +1,86 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+variables:
+  buildConfiguration: 'Release'
+  artifactName: 'workato-project-manifest'
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: CreateArchive
+    displayName: 'Create Source Archive'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - checkout: self
+      displayName: 'Checkout repository'
+    
+    - task: ArchiveFiles@2
+      displayName: 'Create zip archive of src folder'
+      inputs:
+        rootFolderOrFile: '$(Build.SourcesDirectory)/src'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/src-archive.zip'
+        replaceExistingArchive: true
+        verbose: true
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish build artifact'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: '$(artifactName)'
+        publishLocation: 'Container'
+
+- stage: TestDeployment
+  displayName: 'Test Deployment Stage'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - deployment: SendToWorkato
+    displayName: 'Send Archive to Workato'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'test'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: '$(artifactName)'
+            displayName: 'Download build artifact'
+          
+          - task: PowerShell@2
+            displayName: 'Send POST request to Workato API'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $artifactPath = "$(Pipeline.Workspace)/$(artifactName)/src-archive.zip"
+                $uri = "https://www.workato.com/api/packages/import/25995545"
+                $headers = @{
+                    "Authorization" = "Bearer $(workato_rlcm_token)"
+                    "Content-Type" = "application/octet-stream"
+                }
+                
+                Write-Host "Sending archive file to Workato API..."
+                Write-Host "File path: $artifactPath"
+                Write-Host "URI: $uri"
+                
+                try {
+                    $fileBytes = [System.IO.File]::ReadAllBytes($artifactPath)
+                    $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $fileBytes
+                    Write-Host "Success! Response: $($response | ConvertTo-Json -Depth 3)"
+                } catch {
+                    Write-Error "Failed to send request: $($_.Exception.Message)"
+                    Write-Error "Response: $($_.Exception.Response | ConvertTo-Json -Depth 3)"
+                    exit 1
+                }
+              pwsh: true
