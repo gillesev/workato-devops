@@ -106,7 +106,8 @@ stages:
                             try {
                                 Write-Host "Attempt $attempt of $maxRetries..."
                                 $packageDetails = Invoke-RestMethod -Uri $getUri -Method Get -Headers $getHeaders
-                                Write-Host "Package details retrieved successfully on attempt $attempt"
+                                $status = $packageDetails.status
+                                Write-Host "Package status (attempt: $attempt): $status"
                                 if ($packageDetails.status -eq 'completed') {
                                   $success = $true
                                   break
