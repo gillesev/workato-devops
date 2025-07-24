@@ -81,13 +81,13 @@ stages:
                     # Send POST request to import package
                     $fileBytes = [System.IO.File]::ReadAllBytes($artifactPath)
                     $importResponse = Invoke-RestMethod -Uri $importUri -Method Post -Headers $headers -Body $fileBytes
-                    Write-Host "Import Success! Response: $($importResponse | ConvertTo-Json -Depth 3)"
+                    Write-Host "Manifest Upload Request sent: $($importResponse | ConvertTo-Json -Depth 3)"
                     
                     # Extract package ID from response
                     $packageId = $importResponse.id
                     $importStatus = $importResponse.status
                     if ($packageId) {
-                        Write-Host "Package ID from import response: $packageId with response: $importStatus"
+                        Write-Host "Manifest Upload Request ID: $packageId. Status: $importStatus"
                         
                         # Send GET request to retrieve package details with retry logic
                         $getUri = "https://www.workato.com/api/packages/$packageId"
@@ -107,13 +107,13 @@ stages:
                                 Write-Host "Attempt $attempt of $maxRetries..."
                                 $packageDetails = Invoke-RestMethod -Uri $getUri -Method Get -Headers $getHeaders
                                 $status = $packageDetails.status
-                                Write-Host "Package status (attempt: $attempt): $status"
+                                Write-Host "Manifest Upload Request ID: $packageId. Status: $status (Attempt: $attempt)."
                                 if ($packageDetails.status -eq 'completed') {
                                   $success = $true
                                   break
                                 }
                             } catch {
-                                Write-Warning "Attempt $attempt failed: $($_.Exception.Message)"
+                                Write-Warning "Manifest Upload Request ID: $packageId. Attempt $attempt failed: $($_.Exception.Message)"
                                 if ($attempt -lt $maxRetries) {
                                     Write-Host "Waiting $retryDelay seconds before retry..."
                                     Start-Sleep -Seconds $retryDelay
