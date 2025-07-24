@@ -1,14 +1,13 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+# Azure DevOps Pipeline
+# Build stage creates a zip archive of src folder
+# Test deployment stage sends the archive to Workato API
 
 trigger:
 - main
 
 variables:
   buildConfiguration: 'Release'
-  artifactName: 'workato-project-manifest'
+  artifactName: 'workato-manifest'
 
 stages:
 - stage: Build
@@ -43,10 +42,10 @@ stages:
 - stage: TestDeployment
   displayName: 'Test Deployment Stage'
   dependsOn: Build
-  condition: and(succeeded(), eq(variables['Build.Reason'], 'ManualFoo'))
+  condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
   jobs:
   - deployment: SendToWorkato
-    displayName: 'Send Archive to Workato'
+    displayName: 'Upload Manifest to Workato'
     pool:
       vmImage: 'ubuntu-latest'
     environment: 'test'
@@ -55,32 +54,82 @@ stages:
         deploy:
           steps:
           - task: DownloadBuildArtifacts@0
+            displayName: 'Download build artifact'
             inputs:
-              buildType: 'current'            # or 'specific' if downloading from another build
-              downloadType: 'single'          # or 'all' to get all artifacts
-              artifactName: '$(artifactName)' # must match the name used in PublishBuildArtifacts
-              downloadPath: '$(Pipeline.Workspace)'  # where to place the downloaded files
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: '$(artifactName)'
+              downloadPath: '$(Pipeline.Workspace)'
           
           - task: PowerShell@2
-            displayName: 'Send POST request to Workato API'
+            displayName: 'Send Upload Manifest POST request to Workato API'
             inputs:
               targetType: 'inline'
               script: |
                 $artifactPath = "$(Pipeline.Workspace)/$(artifactName)/src-archive.zip"
-                $uri = "https://www.workato.com/api/packages/import/$(workato_rlcm_destination_fip)"
+                $importUri = "https://www.workato.com/api/packages/import/25995545"
                 $headers = @{
                     "Authorization" = "Bearer $(workato_rlcm_token)"
                     "Content-Type" = "application/octet-stream"
                 }
                 
-                Write-Host "Sending archive file to Workato API..."
+                Write-Host "Sending manifest archive file to Workato API..."
                 Write-Host "File path: $artifactPath"
-                Write-Host "URI: $uri"
+                Write-Host "Import URI: $importUri"
                 
                 try {
+                    # Send POST request to import package
                     $fileBytes = [System.IO.File]::ReadAllBytes($artifactPath)
-                    $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $fileBytes
-                    Write-Host "Success! Response: $($response | ConvertTo-Json -Depth 3)"
+                    $importResponse = Invoke-RestMethod -Uri $importUri -Method Post -Headers $headers -Body $fileBytes
+                    Write-Host "Import Success! Response: $($importResponse | ConvertTo-Json -Depth 3)"
+                    
+                    # Extract package ID from response
+                    $packageId = $importResponse.id
+                    $importStatus = $importResponse.status
+                    if ($packageId) {
+                        Write-Host "Package ID from import response: $packageId with response: $importStatus"
+                        
+                        # Send GET request to retrieve package details with retry logic
+                        $getUri = "https://www.workato.com/api/packages/$packageId"
+                        $getHeaders = @{
+                            "Authorization" = "Bearer $(workato_rlcm_token)"
+                        }
+                        
+                        Write-Host "Retrieving package details from: $getUri"
+                        
+                        $maxRetries = $(workato_rlcm_upload_maximum_retries)
+                        $retryDelay = $(workato_rlcm_upload_delay_retry_in_sec)
+                        $packageDetails = $null
+                        $success = $false
+                        
+                        for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                            try {
+                                Write-Host "Attempt $attempt of $maxRetries..."
+                                $packageDetails = Invoke-RestMethod -Uri $getUri -Method Get -Headers $getHeaders
+                                Write-Host "Package details retrieved successfully on attempt $attempt: $($packageDetails | ConvertTo-Json -Depth 3)"
+                                if ($packageDetails.status -eq 'complete') {
+                                  $success = $true
+                                  break
+                                }
+                            } catch {
+                                Write-Warning "Attempt $attempt failed: $($_.Exception.Message)"
+                                if ($attempt -lt $maxRetries) {
+                                    Write-Host "Waiting $retryDelay seconds before retry..."
+                                    Start-Sleep -Seconds $retryDelay
+                                } else {
+                                    Write-Error "All $maxRetries attempts failed to retrieve package details"
+                                    throw
+                                }
+                            }
+                        }
+                        
+                        if (-not $success) {
+                            Write-Error "Failed to retrieve package details after $maxRetries attempts"
+                            exit 1
+                        }
+                    } else {
+                        Write-Warning "No package ID found in import response"
+                    }
                 } catch {
                     Write-Error "Failed to send request: $($_.Exception.Message)"
                     Write-Error "Response: $($_.Exception.Response | ConvertTo-Json -Depth 3)"
