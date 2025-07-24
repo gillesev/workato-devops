@@ -112,6 +112,7 @@ stages:
                                   $success = $true
                                   break
                                 }
+                                Start-Sleep -Seconds $retryDelay
                             } catch {
                                 Write-Warning "Manifest Upload Request ID: $packageId. Attempt $attempt failed: $($_.Exception.Message)"
                                 if ($attempt -lt $maxRetries) {
