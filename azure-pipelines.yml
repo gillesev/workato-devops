@@ -67,7 +67,7 @@ stages:
               targetType: 'inline'
               script: |
                 $artifactPath = "$(Pipeline.Workspace)/$(artifactName)/src-archive.zip"
-                $importUri = "https://www.workato.com/api/packages/import/25995545"
+                $importUri = "https://www.workato.com/api/packages/import/$(workato_rlcm_destination_fip)"
                 $headers = @{
                     "Authorization" = "Bearer $(workato_rlcm_token)"
                     "Content-Type" = "application/octet-stream"
